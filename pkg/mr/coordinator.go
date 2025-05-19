@@ -13,7 +13,7 @@ type status int
 const (
 	Idle    status = iota
 	Running status = iota
-	Done    status = iota
+	Done    status
 )
 
 type jobResultInfo struct {
