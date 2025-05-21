@@ -86,11 +86,11 @@ func (c *Coordinator) getIdleJob(getNextJob chan string) {
 }
 
 func (c *Coordinator) recordFinishedJob(job FinishedWork) {
-	jobStatus, ok := c.mapJobs[job.jobName]
+	jobStatus, ok := c.mapJobs[job.JobName]
 
 	if ok && (jobStatus != Done) {
-		c.mapJobs[job.jobName] = Done
-		c.intermediateFiles = append(c.intermediateFiles, job.outputFiles...)
+		c.mapJobs[job.JobName] = Done
+		c.intermediateFiles = append(c.intermediateFiles, job.OutputFiles...)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -70,8 +71,16 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.Fatal("Error with call RequestJob")
 		}
 		if jobName == "Done" {
+			fmt.Println("Worker finished")
 			break
+		} else if jobName == "Not Done" {
+			fmt.Println("Jobs not done yet")
+			time.Sleep(time.Second)
+			continue
+		} else {
+			fmt.Println("Working this job: " + jobName)
 		}
+
 		contents, err := os.ReadFile(jobName)
 		if err != nil {
 			log.Fatal(err)
@@ -85,6 +94,8 @@ func Worker(mapf func(string, string) []KeyValue,
 		if !ok {
 			log.Fatal("Error with call JobDone")
 		}
+
+		time.Sleep(10 * time.Second)
 	}
 
 }
