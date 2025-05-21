@@ -75,6 +75,7 @@ func (c *Coordinator) getIdleJob(getNextJob chan string) {
 	if !c.mapFinished() {
 		for mapJob, status := range c.mapJobs {
 			if status == Idle {
+				c.mapJobs[mapJob] = Running
 				getNextJob <- mapJob
 				return
 			}
