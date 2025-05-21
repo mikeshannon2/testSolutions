@@ -1,10 +1,13 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
 	"net/rpc"
+	"os"
+	"strconv"
 )
 
 // Map functions return a slice of KeyValue.
@@ -21,6 +24,35 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []string) {
+	generatedFiles = make([]string, 10)
+	reduceTasks := make(map[int][]KeyValue, 10)
+	for _, kvStruct := range kvResults {
+		reduceBucket := ihash(kvStruct.Key) % 10
+		_, ok := reduceTasks[reduceBucket]
+		if ok {
+			reduceTasks[reduceBucket] = append(reduceTasks[reduceBucket], kvStruct)
+		} else {
+			reduceTasks[reduceBucket] = []KeyValue{kvStruct}
+		}
+	}
+
+	for key, value := range reduceTasks {
+		b, err := json.Marshal(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		newFileName := "MR-" + jobName + "-" + strconv.Itoa(key)
+		generatedFiles = append(generatedFiles, newFileName)
+		err = os.WriteFile(newFileName, b, 0600)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	return
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
@@ -29,6 +61,30 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
+
+	for {
+		var jobName string
+		ok := call("RequestJob", 0, &jobName)
+		if !ok {
+			log.Fatal("Error with call RequestJob")
+		}
+		if jobName == "Done" {
+			break
+		}
+		contents, err := os.ReadFile(jobName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		kvResults := mapf(jobName, string(contents))
+		intermediateFiles := outputFileResults(jobName, kvResults)
+		args := FinishedWork{jobName: jobName, outputFiles: intermediateFiles}
+		var temp string
+		ok = call("JobDone", &args, &temp)
+		if !ok {
+			log.Fatal("Error with call JobDone")
+		}
+	}
 
 }
 
