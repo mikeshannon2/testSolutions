@@ -16,8 +16,8 @@ const (
 )
 
 type FinishedWork struct {
-	jobName     string
-	outputFiles []string
+	JobName     string
+	OutputFiles []string
 }
 
 type Coordinator struct {

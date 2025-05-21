@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -42,7 +43,7 @@ func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []s
 		if err != nil {
 			log.Fatal(err)
 		}
-		newFileName := "MR-" + jobName + "-" + strconv.Itoa(key)
+		newFileName := "MR-" + filepath.Base(jobName) + "-" + strconv.Itoa(key)
 		generatedFiles = append(generatedFiles, newFileName)
 		err = os.WriteFile(newFileName, b, 0600)
 		if err != nil {
@@ -78,7 +79,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		kvResults := mapf(jobName, string(contents))
 		intermediateFiles := outputFileResults(jobName, kvResults)
-		args := FinishedWork{jobName: jobName, outputFiles: intermediateFiles}
+		args := FinishedWork{JobName: jobName, OutputFiles: intermediateFiles}
 		var temp string
 		ok = call("Coordinator.JobDone", &args, &temp)
 		if !ok {
