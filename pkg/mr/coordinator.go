@@ -11,19 +11,22 @@ import (
 type status int
 
 const (
-	Idle    status = iota
-	Running status = iota
-	Done    status
+	Idle status = iota
+	Running
+	Done
 )
 
-type jobResultInfo struct {
-	currentStatus status
-	outputFiles   []string
+type FinishedWork struct {
+	jobName     string
+	outputFiles []string
 }
 
 type Coordinator struct {
-	mapJobs    map[string]jobResultInfo
-	reduceJobs map[int]jobResultInfo
+	mapJobs           map[string]status
+	reduceJobs        map[int]status
+	requestWork       chan chan string
+	workDone          chan FinishedWork
+	intermediateFiles []string
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -37,8 +40,8 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 }
 
 func (c *Coordinator) mapFinished() bool {
-	for _, v := range c.mapJobs {
-		if v.currentStatus != Done {
+	for _, currentStatus := range c.mapJobs {
+		if currentStatus != Done {
 			return false
 		}
 	}
@@ -46,12 +49,46 @@ func (c *Coordinator) mapFinished() bool {
 }
 
 func (c *Coordinator) reduceFinished() bool {
-	for _, v := range c.reduceJobs {
-		if v.currentStatus != Done {
+	for _, currentStatus := range c.reduceJobs {
+		if currentStatus != Done {
 			return false
 		}
 	}
 	return true
+}
+
+func (c *Coordinator) getIdleJob(getNextJob chan string) {
+	if !c.mapFinished() {
+		for mapJob, status := range c.mapJobs {
+			if status == Idle {
+				getNextJob <- mapJob
+				return
+			}
+		}
+		getNextJob <- "Not Done"
+	} else {
+		getNextJob <- "Done"
+	}
+}
+
+func (c *Coordinator) recordFinishedJob(job FinishedWork) {
+	jobStatus, ok := c.mapJobs[job.jobName]
+
+	if ok && (jobStatus != Done) {
+		c.mapJobs[job.jobName] = Done
+		c.intermediateFiles = append(c.intermediateFiles, job.outputFiles...)
+	}
+}
+
+func (c *Coordinator) eventLoop() {
+	for {
+		select {
+		case getWork := <-c.requestWork:
+			c.getIdleJob(getWork)
+		case jobComplete := <-c.workDone:
+			c.recordFinishedJob(jobComplete)
+		}
+	}
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -66,6 +103,7 @@ func (c *Coordinator) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
+	go c.eventLoop()
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
@@ -80,16 +118,19 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
-		mapJobs:    make(map[string]jobResultInfo, len(files)),
-		reduceJobs: make(map[int]jobResultInfo, nReduce),
+		mapJobs:           make(map[string]status, len(files)),
+		reduceJobs:        make(map[int]status, nReduce),
+		requestWork:       make(chan chan string),
+		workDone:          make(chan FinishedWork),
+		intermediateFiles: make([]string, len(files)*nReduce),
 	}
 
 	for _, fileName := range files {
-		c.mapJobs[fileName] = jobResultInfo{currentStatus: Idle, outputFiles: []string{}}
+		c.mapJobs[fileName] = Idle
 	}
 
 	for i := 0; i < nReduce; i++ {
-		c.reduceJobs[i] = jobResultInfo{currentStatus: Idle, outputFiles: []string{}}
+		c.reduceJobs[i] = Idle
 	}
 
 	c.server()
