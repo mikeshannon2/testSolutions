@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"os"
 )
 
 type status int
@@ -36,6 +35,21 @@ type Coordinator struct {
 // the RPC argument and reply types are defined in rpc.go.
 func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
+	return nil
+}
+
+func (c *Coordinator) RequestJob(args int, reply *string) error {
+	nextJob := make(chan string, 1)
+	c.requestWork <- nextJob
+	jobName := <-nextJob
+	*reply = jobName
+
+	return nil
+}
+
+func (c *Coordinator) JobDone(input *FinishedWork, reply *string) error {
+	c.workDone <- *input
+	*reply = "Unused"
 	return nil
 }
 
@@ -95,10 +109,10 @@ func (c *Coordinator) eventLoop() {
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
-	sockname := coordinatorSock()
-	os.Remove(sockname)
-	l, e := net.Listen("unix", sockname)
+	l, e := net.Listen("tcp", "127.0.0.1:2233")
+	//sockname := coordinatorSock()
+	//os.Remove(sockname)
+	//l, e := net.Listen("unix", sockname)
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
