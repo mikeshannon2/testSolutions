@@ -64,7 +64,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	for {
 		var jobName string
-		ok := call("RequestJob", 0, &jobName)
+		ok := call("Coordinator.RequestJob", 0, &jobName)
 		if !ok {
 			log.Fatal("Error with call RequestJob")
 		}
@@ -80,7 +80,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		intermediateFiles := outputFileResults(jobName, kvResults)
 		args := FinishedWork{jobName: jobName, outputFiles: intermediateFiles}
 		var temp string
-		ok = call("JobDone", &args, &temp)
+		ok = call("Coordinator.JobDone", &args, &temp)
 		if !ok {
 			log.Fatal("Error with call JobDone")
 		}
