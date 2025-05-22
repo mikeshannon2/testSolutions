@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"time"
 )
 
 type status int
@@ -25,6 +26,7 @@ type Coordinator struct {
 	reduceJobs        map[int]status
 	requestWork       chan chan string
 	workDone          chan FinishedWork
+	timeoutCheck      chan string
 	intermediateFiles []string
 }
 
@@ -76,6 +78,10 @@ func (c *Coordinator) getIdleJob(getNextJob chan string) {
 		for mapJob, status := range c.mapJobs {
 			if status == Idle {
 				c.mapJobs[mapJob] = Running
+				go func(timeoutChannel chan string) {
+					time.Sleep(time.Second * 10)
+					timeoutChannel <- mapJob
+				}(c.timeoutCheck)
 				getNextJob <- mapJob
 				return
 			}
@@ -95,6 +101,13 @@ func (c *Coordinator) recordFinishedJob(job FinishedWork) {
 	}
 }
 
+func (c *Coordinator) checkTimeoutFile(timeoutName string) {
+	mapStatus, ok := c.mapJobs[timeoutName]
+	if ok && (mapStatus != Done) {
+		c.mapJobs[timeoutName] = Idle
+	}
+}
+
 func (c *Coordinator) eventLoop() {
 	for {
 		select {
@@ -102,6 +115,8 @@ func (c *Coordinator) eventLoop() {
 			c.getIdleJob(getWork)
 		case jobComplete := <-c.workDone:
 			c.recordFinishedJob(jobComplete)
+		case timeoutName := <-c.timeoutCheck:
+			c.checkTimeoutFile(timeoutName)
 		}
 	}
 }
@@ -137,6 +152,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		reduceJobs:        make(map[int]status, nReduce),
 		requestWork:       make(chan chan string),
 		workDone:          make(chan FinishedWork),
+		timeoutCheck:      make(chan string),
 		intermediateFiles: make([]string, len(files)*nReduce),
 	}
 

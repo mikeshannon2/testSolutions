@@ -44,7 +44,7 @@ func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []s
 		if err != nil {
 			log.Fatal(err)
 		}
-		newFileName := "MR-" + filepath.Base(jobName) + "-" + strconv.Itoa(key)
+		newFileName := "mr-" + filepath.Base(jobName) + "-" + strconv.Itoa(key)
 		generatedFiles = append(generatedFiles, newFileName)
 		err = os.WriteFile(newFileName, b, 0600)
 		if err != nil {
