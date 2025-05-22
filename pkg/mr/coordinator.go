@@ -16,18 +16,36 @@ const (
 	Done
 )
 
+type JobType int
+
+const (
+	MapJob JobType = iota
+	ReduceJob
+)
+
+type JobInfo struct {
+	TypeOfJob     JobType
+	ReduceJobName int
+	JobFiles      []string
+}
+
 type FinishedWork struct {
 	JobName     string
-	OutputFiles []string
+	OutputFiles map[int][]string
+}
+
+type FinishedReduceJob struct {
+	ReduceJobName int
 }
 
 type Coordinator struct {
 	mapJobs           map[string]status
 	reduceJobs        map[int]status
-	requestWork       chan chan string
+	requestWork       chan chan JobInfo
 	workDone          chan FinishedWork
+	reduceWorkDone    chan FinishedReduceJob
 	timeoutCheck      chan string
-	intermediateFiles []string
+	intermediateFiles map[int][]string
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -40,8 +58,8 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
-func (c *Coordinator) RequestJob(args int, reply *string) error {
-	nextJob := make(chan string, 1)
+func (c *Coordinator) RequestJob(args int, reply *JobInfo) error {
+	nextJob := make(chan JobInfo, 1)
 	c.requestWork <- nextJob
 	jobName := <-nextJob
 	*reply = jobName
@@ -51,6 +69,12 @@ func (c *Coordinator) RequestJob(args int, reply *string) error {
 
 func (c *Coordinator) JobDone(input *FinishedWork, reply *string) error {
 	c.workDone <- *input
+	*reply = "Unused"
+	return nil
+}
+
+func (c *Coordinator) ReduceJobDone(input *FinishedReduceJob, reply *string) error {
+	c.reduceWorkDone <- *input
 	*reply = "Unused"
 	return nil
 }
@@ -73,8 +97,9 @@ func (c *Coordinator) reduceFinished() bool {
 	return true
 }
 
-func (c *Coordinator) getIdleJob(getNextJob chan string) {
+func (c *Coordinator) getIdleJob(getNextJob chan JobInfo) {
 	if !c.mapFinished() {
+		newJobInfo := JobInfo{TypeOfJob: MapJob}
 		for mapJob, status := range c.mapJobs {
 			if status == Idle {
 				c.mapJobs[mapJob] = Running
@@ -82,13 +107,15 @@ func (c *Coordinator) getIdleJob(getNextJob chan string) {
 					time.Sleep(time.Second * 10)
 					timeoutChannel <- mapJob
 				}(c.timeoutCheck)
-				getNextJob <- mapJob
+				newJobInfo.JobFiles = append(newJobInfo.JobFiles, mapJob)
+				getNextJob <- newJobInfo
 				return
 			}
 		}
-		getNextJob <- "Not Done"
+		newJobInfo.JobFiles = append(newJobInfo.JobFiles, "Not Done")
+		getNextJob <- newJobInfo
 	} else {
-		getNextJob <- "Done"
+		getNextJob <- JobInfo{TypeOfJob: MapJob, JobFiles: []string{"Done"}}
 	}
 }
 
@@ -97,7 +124,22 @@ func (c *Coordinator) recordFinishedJob(job FinishedWork) {
 
 	if ok && (jobStatus != Done) {
 		c.mapJobs[job.JobName] = Done
-		c.intermediateFiles = append(c.intermediateFiles, job.OutputFiles...)
+		for bucket, files := range job.OutputFiles {
+			_, foundBucket := c.intermediateFiles[bucket]
+			if foundBucket {
+				c.intermediateFiles[bucket] = append(c.intermediateFiles[bucket], files...)
+			} else {
+				c.intermediateFiles[bucket] = files
+			}
+		}
+	}
+}
+
+func (c *Coordinator) recordFinishedReduceJob(job FinishedReduceJob) {
+	jobStatus, ok := c.reduceJobs[job.ReduceJobName]
+
+	if ok && (jobStatus != Done) {
+		c.reduceJobs[job.ReduceJobName] = Done
 	}
 }
 
@@ -115,6 +157,8 @@ func (c *Coordinator) eventLoop() {
 			c.getIdleJob(getWork)
 		case jobComplete := <-c.workDone:
 			c.recordFinishedJob(jobComplete)
+		case reduceJobComplete := <-c.reduceWorkDone:
+			c.recordFinishedReduceJob(reduceJobComplete)
 		case timeoutName := <-c.timeoutCheck:
 			c.checkTimeoutFile(timeoutName)
 		}
@@ -150,10 +194,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
 		mapJobs:           make(map[string]status, len(files)),
 		reduceJobs:        make(map[int]status, nReduce),
-		requestWork:       make(chan chan string),
+		requestWork:       make(chan chan JobInfo),
 		workDone:          make(chan FinishedWork),
+		reduceWorkDone:    make(chan FinishedReduceJob),
 		timeoutCheck:      make(chan string),
-		intermediateFiles: make([]string, len(files)*nReduce),
+		intermediateFiles: make(map[int][]string, nReduce),
 	}
 
 	for _, fileName := range files {

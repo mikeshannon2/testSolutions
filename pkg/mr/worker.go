@@ -26,8 +26,8 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []string) {
-	generatedFiles = make([]string, 10)
+func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles map[int][]string) {
+	generatedFiles = make(map[int][]string, 10)
 	reduceTasks := make(map[int][]KeyValue, 10)
 	for _, kvStruct := range kvResults {
 		reduceBucket := ihash(kvStruct.Key) % 10
@@ -45,7 +45,7 @@ func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []s
 			log.Fatal(err)
 		}
 		newFileName := "mr-" + filepath.Base(jobName) + "-" + strconv.Itoa(key)
-		generatedFiles = append(generatedFiles, newFileName)
+		generatedFiles[key] = append(generatedFiles[key], newFileName)
 		err = os.WriteFile(newFileName, b, 0600)
 		if err != nil {
 			log.Fatal(err)
@@ -53,6 +53,24 @@ func outputFileResults(jobName string, kvResults []KeyValue) (generatedFiles []s
 	}
 
 	return
+}
+
+func handleMapJob(mapf func(string, string) []KeyValue, jobName string) {
+	contents, err := os.ReadFile(jobName)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	kvResults := mapf(jobName, string(contents))
+	intermediateFiles := outputFileResults(jobName, kvResults)
+	args := FinishedWork{JobName: jobName, OutputFiles: intermediateFiles}
+	var temp string
+	ok := call("Coordinator.JobDone", &args, &temp)
+	if !ok {
+		log.Fatal("Error with call JobDone")
+	}
+
+	time.Sleep(10 * time.Second)
 }
 
 // main/mrworker.go calls this function.
@@ -66,10 +84,12 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	for {
 		var jobName string
-		ok := call("Coordinator.RequestJob", 0, &jobName)
+		var jobInfo JobInfo
+		ok := call("Coordinator.RequestJob", 0, &jobInfo)
 		if !ok {
 			log.Fatal("Error with call RequestJob")
 		}
+		jobName = jobInfo.JobFiles[0]
 		if jobName == "Done" {
 			fmt.Println("Worker finished")
 			break
@@ -81,21 +101,9 @@ func Worker(mapf func(string, string) []KeyValue,
 			fmt.Println("Working this job: " + jobName)
 		}
 
-		contents, err := os.ReadFile(jobName)
-		if err != nil {
-			log.Fatal(err)
+		if jobInfo.TypeOfJob == MapJob {
+			handleMapJob(mapf, jobName)
 		}
-
-		kvResults := mapf(jobName, string(contents))
-		intermediateFiles := outputFileResults(jobName, kvResults)
-		args := FinishedWork{JobName: jobName, OutputFiles: intermediateFiles}
-		var temp string
-		ok = call("Coordinator.JobDone", &args, &temp)
-		if !ok {
-			log.Fatal("Error with call JobDone")
-		}
-
-		time.Sleep(10 * time.Second)
 	}
 
 }
