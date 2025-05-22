@@ -73,6 +73,9 @@ func handleMapJob(mapf func(string, string) []KeyValue, jobName string) {
 	time.Sleep(10 * time.Second)
 }
 
+func handleReduceJob(reducef func(string, []string) string, jobInfo JobInfo) {
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
@@ -103,6 +106,8 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		if jobInfo.TypeOfJob == MapJob {
 			handleMapJob(mapf, jobName)
+		} else {
+			handleReduceJob(reducef, jobInfo)
 		}
 	}
 

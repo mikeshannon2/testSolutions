@@ -114,6 +114,19 @@ func (c *Coordinator) getIdleJob(getNextJob chan JobInfo) {
 		}
 		newJobInfo.JobFiles = append(newJobInfo.JobFiles, "Not Done")
 		getNextJob <- newJobInfo
+	} else if !c.reduceFinished() {
+		newJobInfo := JobInfo{TypeOfJob: ReduceJob}
+		for reduceJob, reduceStatus := range c.reduceJobs {
+			if reduceStatus == Idle {
+				c.reduceJobs[reduceJob] = Running
+				newJobInfo.JobFiles = append(newJobInfo.JobFiles, c.intermediateFiles[reduceJob]...)
+				newJobInfo.ReduceJobName = reduceJob
+				getNextJob <- newJobInfo
+				return
+			}
+		}
+		newJobInfo.JobFiles = append(newJobInfo.JobFiles, "Not Done")
+		getNextJob <- newJobInfo
 	} else {
 		getNextJob <- JobInfo{TypeOfJob: MapJob, JobFiles: []string{"Done"}}
 	}
