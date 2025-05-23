@@ -39,13 +39,15 @@ type FinishedReduceJob struct {
 }
 
 type Coordinator struct {
-	mapJobs           map[string]status
-	reduceJobs        map[int]status
-	requestWork       chan chan JobInfo
-	workDone          chan FinishedWork
-	reduceWorkDone    chan FinishedReduceJob
-	timeoutCheck      chan string
-	intermediateFiles map[int][]string
+	mapJobs            map[string]status
+	reduceJobs         map[int]status
+	requestWork        chan chan JobInfo
+	workDone           chan FinishedWork
+	reduceWorkDone     chan FinishedReduceJob
+	timeoutCheck       chan string
+	timeoutCheckReduce chan int
+	isDoneCheck        chan chan bool
+	intermediateFiles  map[int][]string
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -119,6 +121,10 @@ func (c *Coordinator) getIdleJob(getNextJob chan JobInfo) {
 		for reduceJob, reduceStatus := range c.reduceJobs {
 			if reduceStatus == Idle {
 				c.reduceJobs[reduceJob] = Running
+				go func(timeoutChannel chan int) {
+					time.Sleep(time.Second * 10)
+					timeoutChannel <- reduceJob
+				}(c.timeoutCheckReduce)
 				newJobInfo.JobFiles = append(newJobInfo.JobFiles, c.intermediateFiles[reduceJob]...)
 				newJobInfo.ReduceJobName = reduceJob
 				getNextJob <- newJobInfo
@@ -138,6 +144,7 @@ func (c *Coordinator) recordFinishedJob(job FinishedWork) {
 	if ok && (jobStatus != Done) {
 		c.mapJobs[job.JobName] = Done
 		for bucket, files := range job.OutputFiles {
+			c.reduceJobs[bucket] = Idle
 			_, foundBucket := c.intermediateFiles[bucket]
 			if foundBucket {
 				c.intermediateFiles[bucket] = append(c.intermediateFiles[bucket], files...)
@@ -163,6 +170,13 @@ func (c *Coordinator) checkTimeoutFile(timeoutName string) {
 	}
 }
 
+func (c *Coordinator) checkTimeoutReduce(timeoutNumber int) {
+	reduceStatus, ok := c.reduceJobs[timeoutNumber]
+	if ok && (reduceStatus != Done) {
+		c.reduceJobs[timeoutNumber] = Idle
+	}
+}
+
 func (c *Coordinator) eventLoop() {
 	for {
 		select {
@@ -174,6 +188,10 @@ func (c *Coordinator) eventLoop() {
 			c.recordFinishedReduceJob(reduceJobComplete)
 		case timeoutName := <-c.timeoutCheck:
 			c.checkTimeoutFile(timeoutName)
+		case timeoutNumber := <-c.timeoutCheckReduce:
+			c.checkTimeoutReduce(timeoutNumber)
+		case isDone := <-c.isDoneCheck:
+			isDone <- (c.mapFinished() && c.reduceFinished())
 		}
 	}
 }
@@ -196,7 +214,9 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := c.mapFinished() && c.reduceFinished()
+	isDone := make(chan bool, 1)
+	c.isDoneCheck <- isDone
+	ret := <-isDone
 	return ret
 }
 
@@ -205,21 +225,19 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
-		mapJobs:           make(map[string]status, len(files)),
-		reduceJobs:        make(map[int]status, nReduce),
-		requestWork:       make(chan chan JobInfo),
-		workDone:          make(chan FinishedWork),
-		reduceWorkDone:    make(chan FinishedReduceJob),
-		timeoutCheck:      make(chan string),
-		intermediateFiles: make(map[int][]string, nReduce),
+		mapJobs:            make(map[string]status, len(files)),
+		reduceJobs:         make(map[int]status, nReduce),
+		requestWork:        make(chan chan JobInfo),
+		workDone:           make(chan FinishedWork),
+		reduceWorkDone:     make(chan FinishedReduceJob),
+		timeoutCheck:       make(chan string),
+		timeoutCheckReduce: make(chan int),
+		isDoneCheck:        make(chan chan bool),
+		intermediateFiles:  make(map[int][]string, nReduce),
 	}
 
 	for _, fileName := range files {
 		c.mapJobs[fileName] = Idle
-	}
-
-	for i := 0; i < nReduce; i++ {
-		c.reduceJobs[i] = Idle
 	}
 
 	c.server()

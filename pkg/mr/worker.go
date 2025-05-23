@@ -70,10 +70,50 @@ func handleMapJob(mapf func(string, string) []KeyValue, jobName string) {
 		log.Fatal("Error with call JobDone")
 	}
 
-	time.Sleep(10 * time.Second)
+	//time.Sleep(10 * time.Second)
 }
 
 func handleReduceJob(reducef func(string, []string) string, jobInfo JobInfo) {
+	reduceJobName := jobInfo.ReduceJobName
+	reduceJobFiles := jobInfo.JobFiles
+	kvList := make(map[string][]string)
+	reduceFinal := ""
+
+	for _, fileName := range reduceJobFiles {
+		var kvSlice []KeyValue
+		byteSlice, err := os.ReadFile(fileName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = json.Unmarshal(byteSlice, &kvSlice)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, kvInstance := range kvSlice {
+			kvList[kvInstance.Key] = append(kvList[kvInstance.Key], kvInstance.Value)
+		}
+	}
+
+	for key, value := range kvList {
+		reduceResult := reducef(key, value)
+		reduceFinal = reduceFinal + fmt.Sprintf("%v %v\n", key, reduceResult)
+	}
+
+	err := os.WriteFile("mr-out-"+strconv.Itoa(reduceJobName), []byte(reduceFinal), 0600)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var temp string
+	finishedJob := FinishedReduceJob{ReduceJobName: reduceJobName}
+	ok := call("Coordinator.ReduceJobDone", &finishedJob, &temp)
+	if !ok {
+		log.Fatal("Error using rpc for ReduceJobDone")
+	}
+
+	//time.Sleep(time.Second * 3)
 }
 
 // main/mrworker.go calls this function.
@@ -91,6 +131,9 @@ func Worker(mapf func(string, string) []KeyValue,
 		ok := call("Coordinator.RequestJob", 0, &jobInfo)
 		if !ok {
 			log.Fatal("Error with call RequestJob")
+		}
+		if jobInfo.TypeOfJob == ReduceJob {
+			fmt.Printf("ERROR CHECK: %v\n", jobInfo.ReduceJobName)
 		}
 		jobName = jobInfo.JobFiles[0]
 		if jobName == "Done" {
